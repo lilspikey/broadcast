@@ -7,14 +7,10 @@ import cgi
 
 def acquire_then_notify(fn):
     def _decorated(self, *arg, **kw):
-        self._condition.acquire()
-        try:
-            val = fn(self, *arg, **kw)
-            self._condition.notifyAll()
-            return val
-        finally:
-            self._condition.release()
-    return _decorated
+        val = fn(self, *arg, **kw)
+        self._condition.notifyAll()
+        return val
+    return acquire(_decorated)
 
 def acquire(fn):
     def _decorated(self, *arg, **kw):
@@ -45,14 +41,14 @@ class Broadcaster(object):
         return found
     
     @acquire
-    def recv(self, since_id=None):
+    def recv(self, since_id=None, timeout=10000):
         while True:
             found = self._find_items(since_id)
             if found:
                 print "found %d" % len(found)
                 return found
             print "Waiting"
-            self._condition.wait()
+            self._condition.wait(timeout)
 
 broadcast = Broadcaster()
 
@@ -88,7 +84,7 @@ class BroadcastRequestHandler(BaseHTTPRequestHandler):
     def recv_GET(self, since_id=None):
         if since_id is not None:
             since_id = int(since_id)
-        messages = broadcast.recv(since_id)
+        messages = broadcast.recv(since_id, timeout=5*60*1000)
         return '\n'.join('%r, %r' % (id, message) for (id, message) in messages)
     
     @send_response()
@@ -120,7 +116,7 @@ class BroadcastRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 class BroadcastHTTPServer(ThreadingMixIn, HTTPServer):
-    pass
+    daemon_threads = True
 
 if __name__ == '__main__':
     server_address = ('', 8192)
