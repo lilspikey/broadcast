@@ -4,6 +4,7 @@ from threading import Condition
 
 import re
 import cgi
+from time import time
 
 def acquire_then_notify(fn):
     def _decorated(self, *arg, **kw):
@@ -41,14 +42,16 @@ class Broadcaster(object):
         return found
     
     @acquire
-    def recv(self, since_id=None, timeout=10000):
-        while True:
+    def recv(self, since_id=None, timeout=10):
+        end_time = time() + timeout
+        while time() < end_time:
             found = self._find_items(since_id)
             if found:
-                print "found %d" % len(found)
-                return found
+                break
             print "Waiting"
             self._condition.wait(timeout)
+        print "found %d" % len(found)
+        return found
 
 broadcast = Broadcaster()
 
@@ -84,7 +87,7 @@ class BroadcastRequestHandler(BaseHTTPRequestHandler):
     def recv_GET(self, since_id=None):
         if since_id is not None:
             since_id = int(since_id)
-        messages = broadcast.recv(since_id, timeout=5*60*1000)
+        messages = broadcast.recv(since_id, timeout=10)
         return '\n'.join('%r, %r' % (id, message) for (id, message) in messages)
     
     @send_response()
