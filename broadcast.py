@@ -35,7 +35,7 @@ class Broadcaster(object):
         self._queue.append((self._last_id, item))
     
     def _find_items(self, since_id=None):
-        if since_id is None:
+        if not since_id:
             found = self._queue
         else:
             found = [(id, item) for (id,item) in self._queue if id > since_id]
@@ -66,15 +66,46 @@ def send_response(content_type='text/html'):
         return _decorated
     return _decorator
 
+_content_types={
+    'html': 'text/html',
+    'js': 'text/javascript',
+    'css': 'text/css'
+}
+
+def file_suffix(file_name):
+    suffix=''
+    dot_index=file_name.rfind('.')
+    if dot_index > -1:
+        suffix=file_name[dot_index+1:]
+    return suffix
+
 class BroadcastRequestHandler(BaseHTTPRequestHandler):
+    
+    def _serve_file(self,file_name):
+        suffix=file_suffix(file_name)
+        self.send_response(200)
+        self.send_header("Content-type", _content_types.get(suffix,"text/plain") )
+        self.end_headers()
+        f=open(file_name)
+        try:
+            while True:
+                bytes=f.read(1024)
+                if bytes:
+                    self.wfile.write(bytes)
+                else:
+                    break
+        finally:
+            f.close()
     
     def do_GET(self):
         if self.path == '/':
-            self.recv_GET()
-        elif self.path == '/send':
-            self.send_GET()
+            self._serve_file('index.html')
+        elif self.path == '/jquery.js':
+            self._serve_file('jquery-1.3.2.min.js')
+        elif self.path == '/broadcast.js':
+            self._serve_file('broadcast.js')
         else:
-            m = re.match(r'/since/(\d+)', self.path)
+            m = re.match(r'^/since/(\d*)$', self.path)
             if m:
                 self.recv_GET(m.group(1))
             else:
@@ -85,24 +116,12 @@ class BroadcastRequestHandler(BaseHTTPRequestHandler):
     
     @send_response(content_type='text/plain')
     def recv_GET(self, since_id=None):
-        if since_id is not None:
+        if since_id:
             since_id = int(since_id)
-        messages = broadcast.recv(since_id, timeout=10)
-        return '\n'.join('%r, %r' % (id, message) for (id, message) in messages)
+        messages = broadcast.recv(since_id, timeout=3*60)
+        return '[ %s ]' % (',\n'.join('{ id: %r, message: %r }' % (id, message) for (id, message) in messages))
     
-    @send_response()
-    def send_GET(self):
-        return '''
-        <html>
-        <body>
-        <form action="/send" method="post">
-            Message: <input type="text" name="message" />
-            <input type="submit" />
-        </form>
-        </body>
-        </html>
-        '''
-    
+    @send_response(content_type='text/plain')
     def send_POST(self):
         form = cgi.FieldStorage(
                 fp=self.rfile, 
@@ -114,15 +133,13 @@ class BroadcastRequestHandler(BaseHTTPRequestHandler):
             message = form['message'].value
             broadcast.send(message)
             
-        self.send_response(302)
-        self.send_header('Location', '/send')
-        self.end_headers()
+        return 'Received'
 
 class BroadcastHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 if __name__ == '__main__':
-    server_address = ('', 8192)
+    server_address = ('192.168.1.237', 8192)
     httpd = BroadcastHTTPServer(server_address, BroadcastRequestHandler)
     print "Listening on ", server_address
     try:
